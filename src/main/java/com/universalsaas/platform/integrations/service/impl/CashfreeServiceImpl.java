@@ -96,6 +96,19 @@ public class CashfreeServiceImpl implements CashfreeService {
                 "customer_email", request.getCustomerEmail() != null ? request.getCustomerEmail() : "customer@example.com",
                 "customer_phone", request.getCustomerPhone() != null ? request.getCustomerPhone() : "9999999999"
         ));
+        // Add order_meta if return_url / notify_url are configured
+        String returnUrl = settingService.getSettingValue(tiId, "return_url");
+        String notifyUrl = settingService.getSettingValue(tiId, "notify_url");
+        Map<String, Object> orderMeta = new LinkedHashMap<>();
+        if (returnUrl != null && !returnUrl.isBlank()) {
+            orderMeta.put("return_url", returnUrl.trim() + "?order_id={order_id}");
+        }
+        if (notifyUrl != null && !notifyUrl.isBlank()) {
+            orderMeta.put("notify_url", notifyUrl.trim());
+        }
+        if (!orderMeta.isEmpty()) {
+            orderBody.put("order_meta", orderMeta);
+        }
 
         HttpHeaders headers = cashfreeHeaders(appId, secret);
         ResponseEntity<Map> response = restTemplate.exchange(baseUrl + "/orders", HttpMethod.POST,
@@ -170,16 +183,84 @@ public class CashfreeServiceImpl implements CashfreeService {
     public void handleWebhook(String payload) {
         Long tenantId = tenantContextService.getCurrentTenantId();
         var ctx = tenantIntegrationResolver.resolveContext(CASHFREE_CODE);
-        logService.log(tenantId, ctx.getTenantIntegration().getId(), CASHFREE_CODE, "payment_webhook", "webhook",
-                payload, null, "SUCCESS", 200, null, 0);
+        Long tenantIntegrationId = ctx.getTenantIntegration().getId();
         try {
-            Map<String, Object> data = JsonUtil.mapper().readValue(payload, Map.class);
-            String orderId = String.valueOf(data.getOrDefault("order_id", data.get("orderId")));
-            String status = String.valueOf(data.getOrDefault("order_status", data.get("payment_status")));
+            Map<String, Object> root = JsonUtil.mapper().readValue(payload, Map.class);
+
+            String eventType = String.valueOf(root.getOrDefault("type", "UNKNOWN"));
+
+            String orderId = null;
+            String status = null;
+
+            Object dataObj = root.get("data");
+            if (dataObj instanceof Map<?, ?> data) {
+                Object orderObj = data.get("order");
+                Object paymentObj = data.get("payment");
+                if (orderObj instanceof Map<?, ?> order) {
+                    Object orderIdObj = order.get("order_id");
+                    Object orderStatusObj = order.get("order_status");
+                    if (orderIdObj != null) {
+                        orderId = String.valueOf(orderIdObj);
+                    }
+                    if (orderStatusObj != null) {
+                        status = String.valueOf(orderStatusObj);
+                    }
+                }
+                if (paymentObj instanceof Map<?, ?> payment) {
+                    Object paymentStatusObj = payment.get("payment_status");
+                    if (paymentStatusObj != null) {
+                        status = String.valueOf(paymentStatusObj);
+                    }
+                }
+            }
+            // fallback for flat payloads
+            if (orderId == null) {
+                Object flatOrderId = root.getOrDefault("order_id", root.get("orderId"));
+                if (flatOrderId != null) {
+                    orderId = String.valueOf(flatOrderId);
+                }
+            }
+            if (status == null) {
+                Object flatStatus = root.getOrDefault("order_status", root.get("payment_status"));
+                if (flatStatus != null) {
+                    status = String.valueOf(flatStatus);
+                }
+            }
+            if (orderId == null || orderId.isBlank() || "null".equalsIgnoreCase(orderId)) {
+                throw new IntegrationException("Cashfree webhook missing order_id");
+            }
+            if (status == null || status.isBlank() || "null".equalsIgnoreCase(status)) {
+                throw new IntegrationException("Cashfree webhook missing payment/order status");
+            }
             paymentAdapter.updatePaymentStatus(orderId, status, "CASHFREE", tenantId);
+            logService.log(
+                    tenantId,
+                    tenantIntegrationId,
+                    CASHFREE_CODE,
+                    "payment_webhook",
+                    eventType,
+                    payload,
+                    "orderId=" + orderId + ", status=" + status,
+                    "SUCCESS",
+                    200,
+                    null,
+                    0
+            );
         } catch (Exception e) {
-            logService.log(tenantId, ctx.getTenantIntegration().getId(), CASHFREE_CODE, "payment_webhook", "webhook",
-                    payload, null, "FAILED", 500, e.getMessage(), 0);
+            logService.log(
+                    tenantId,
+                    tenantIntegrationId,
+                    CASHFREE_CODE,
+                    "payment_webhook",
+                    "webhook_failed",
+                    payload,
+                    null,
+                    "FAILED",
+                    500,
+                    e.getMessage(),
+                    0
+            );
+            throw new IntegrationException("Cashfree webhook processing failed: " + e.getMessage());
         }
     }
 

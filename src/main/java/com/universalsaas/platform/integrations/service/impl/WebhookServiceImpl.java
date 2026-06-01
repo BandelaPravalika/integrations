@@ -27,6 +27,12 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import com.universalsaas.platform.integrations.entity.TenantIntegration;
+import com.universalsaas.platform.integrations.enums.IntegrationHealth;
+import com.universalsaas.platform.integrations.enums.IntegrationStatus;
+import com.universalsaas.platform.integrations.entity.IntegrationDefinition;
+import com.universalsaas.platform.integrations.repository.IntegrationDefinitionRepository;
+import com.universalsaas.platform.integrations.repository.TenantIntegrationRepository;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,6 +40,8 @@ import java.util.stream.Collectors;
 public class WebhookServiceImpl implements WebhookService {
 
     private final WebhookSubscriptionRepository subscriptionRepository;
+    private final TenantIntegrationRepository tenantIntegrationRepository;
+    private final IntegrationDefinitionRepository integrationDefinitionRepository;
     private final WebhookDeliveryLogRepository deliveryLogRepository;
     private final TenantContextService tenantContextService;
     private final EncryptionService encryptionService;
@@ -53,7 +61,30 @@ public class WebhookServiceImpl implements WebhookService {
                 .events(request.getEvents() != null ? String.join(",", request.getEvents()) : "")
                 .enabled(request.getEnabled() != null ? request.getEnabled() : true)
                 .build();
-        return toResponse(subscriptionRepository.save(sub));
+        WebhookSubscription saved = subscriptionRepository.save(sub);
+        
+        // Ensure WEBHOOK integration row exists and mark it connected
+        IntegrationDefinition definition = integrationDefinitionRepository.findByCode("WEBHOOK")
+                .orElseThrow(() -> new RuntimeException("WEBHOOK integration definition not found"));
+        TenantIntegration integration = tenantIntegrationRepository.findByTenantIdAndCode(tenantId, "WEBHOOK")
+                .orElseGet(() -> {
+                    TenantIntegration newIntegration = new TenantIntegration();
+                    newIntegration.setTenantId(tenantId);
+                    newIntegration.setCode("WEBHOOK");
+                    newIntegration.setIntegrationDefinitionId(definition.getId());
+                    newIntegration.setEnvironment("sandbox");
+                    return newIntegration;
+                });
+        
+        integration.setConnected(true);
+        integration.setEnabled(true);
+        integration.setStatus(IntegrationStatus.CONNECTED);
+        integration.setHealth(IntegrationHealth.HEALTHY);
+        integration.setConnectedAt(LocalDateTime.now());
+        integration.setDisconnectedAt(null);
+        tenantIntegrationRepository.save(integration);
+        
+        return toResponse(saved);
     }
 
     @Override
@@ -83,8 +114,21 @@ public class WebhookServiceImpl implements WebhookService {
     @Override
     @Transactional
     public void delete(Long id) {
+        Long tenantId = tenantContextService.getCurrentTenantId();
         WebhookSubscription sub = findSubscription(id);
         subscriptionRepository.delete(sub);
+        // If no more subscriptions, mark integration as disconnected
+        List<WebhookSubscription> remaining = subscriptionRepository.findByTenantId(tenantId);
+        if (remaining.isEmpty()) {
+            tenantIntegrationRepository.findByTenantIdAndCode(tenantId, "WEBHOOK")
+                    .ifPresent(integration -> {
+                        integration.setConnected(false);
+                        integration.setStatus(IntegrationStatus.DISCONNECTED);
+                        integration.setHealth(IntegrationHealth.UNKNOWN);
+                        integration.setDisconnectedAt(LocalDateTime.now());
+                        tenantIntegrationRepository.save(integration);
+                    });
+        }
     }
 
     @Override
@@ -132,9 +176,14 @@ public class WebhookServiceImpl implements WebhookService {
         List<WebhookSubscription> subs = subscriptionRepository.findByTenantIdAndEnabledTrue(tenantId);
         Map<String, Object> body = buildPayload(eventName, tenantId, module, referenceId, payload);
         for (WebhookSubscription sub : subs) {
-            if (sub.getEvents() == null || sub.getEvents().isBlank() || sub.getEvents().contains(eventName)) {
-                deliverToSubscription(sub, eventName, body, module, referenceId);
-            }
+            boolean shouldDeliver = sub.getEvents() == null
+                    || sub.getEvents().isBlank()
+                    || Arrays.stream(sub.getEvents().split(","))
+                        .map(String::trim)
+                        .anyMatch(eventName::equals);
+                if (shouldDeliver) {
+                    deliverToSubscription(sub, eventName, body, module, referenceId);
+                }
         }
     }
 

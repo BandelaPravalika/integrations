@@ -1,6 +1,7 @@
 package com.universalsaas.platform.integrations.service;
 
 import com.universalsaas.platform.integrations.dto.ApiKeyCreateRequest;
+import com.universalsaas.platform.integrations.entity.ApiKey;
 import com.universalsaas.platform.integrations.dto.ApiKeyResponse;
 import com.universalsaas.platform.integrations.dto.ApiKeyUsageLogResponse;
 import org.springframework.data.domain.Page;
@@ -15,4 +16,5 @@ public interface ApiKeyService {
     ApiKeyResponse regenerate(Long id);
     void revoke(Long id);
     Page<ApiKeyUsageLogResponse> getUsageLogs(Long id, Pageable pageable);
+    ApiKey validateExternalApiKey(String apiKey, String apiSecret, String permission, String endpoint, String method, String ipAddress);
 }

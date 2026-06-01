@@ -3,6 +3,7 @@ package com.universalsaas.platform.integrations.service.impl;
 import com.universalsaas.platform.integrations.dto.ApiKeyCreateRequest;
 import com.universalsaas.platform.integrations.dto.ApiKeyResponse;
 import com.universalsaas.platform.integrations.dto.ApiKeyUsageLogResponse;
+import com.universalsaas.platform.integrations.entity.ApiKeyUsageLog;
 import com.universalsaas.platform.integrations.entity.ApiKey;
 import com.universalsaas.platform.integrations.enums.ApiKeyStatus;
 import com.universalsaas.platform.integrations.exception.IntegrationNotFoundException;
@@ -156,5 +157,65 @@ public class ApiKeyServiceImpl implements ApiKeyService {
                 .status(apiKey.getStatus() != null ? apiKey.getStatus().name() : null)
                 .createdAt(apiKey.getCreatedAt())
                 .build();
+    }
+    @Override
+    public ApiKey validateExternalApiKey(String apiKey, String apiSecret, String permission, String endpoint, String method, String ipAddress) {
+        // Missing API key
+        if (apiKey == null || apiKey.isBlank()) {
+            logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{apiKey missing}", null, "MISSING_API_KEY", 401, null, 0);
+            throw new IntegrationNotFoundException("Missing API key");
+        }
+        // Missing API secret
+        if (apiSecret == null || apiSecret.isBlank()) {
+            logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{apiSecret missing}", null, "MISSING_API_SECRET", 401, null, 0);
+            throw new IntegrationNotFoundException("Missing API secret");
+        }
+        String apiKeyHash = ApiKeyGenerator.hash(apiKey);
+        ApiKey key = apiKeyRepository.findByApiKeyHashAndStatus(apiKeyHash, ApiKeyStatus.ACTIVE)
+                .orElseThrow(() -> {
+                    logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{invalid key}", null, "INVALID_API_KEY", 401, null, 0);
+                    return new IntegrationNotFoundException("Invalid API key");
+                });
+        // Validate secret
+        String apiSecretHash = ApiKeyGenerator.hash(apiSecret);
+        if (!apiSecretHash.equals(key.getApiSecretHash())) {
+            logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{invalid secret}", null, "INVALID_API_SECRET", 401, null, 0);
+            throw new IntegrationNotFoundException("Invalid API secret");
+        }
+        // Validate expiry
+        if (key.getExpiryDate() != null && LocalDateTime.now().isAfter(key.getExpiryDate())) {
+            key.setStatus(ApiKeyStatus.EXPIRED);
+            apiKeyRepository.save(key);
+            logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{expired}", null, "EXPIRED", 401, null, 0);
+            throw new IntegrationNotFoundException("API key expired");
+        }
+        // Validate IP whitelist if provided
+        if (ipAddress != null && !ipAddress.isBlank() && key.getIpWhitelist() != null && !key.getIpWhitelist().isBlank()) {
+            List<String> whitelist = Arrays.asList(key.getIpWhitelist().split(","));
+            if (!whitelist.contains(ipAddress)) {
+                logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{ip blocked}", null, "IP_BLOCKED", 401, null, 0);
+                throw new IntegrationNotFoundException("IP not allowed");
+            }
+        }
+        // Validate permission if required
+        if (permission != null && !permission.isBlank() && key.getPermissions() != null && !key.getPermissions().isBlank()) {
+            List<String> perms = Arrays.asList(key.getPermissions().split(","));
+            if (!perms.contains(permission)) {
+                logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{permission denied}", null, "PERMISSION_DENIED", 401, null, 0);
+                throw new IntegrationNotFoundException("Permission denied");
+            }
+        }
+        // Successful validation, log usage
+        ApiKeyUsageLog log = ApiKeyUsageLog.builder()
+                .tenantId(tenantContextService.getCurrentTenantId())
+                .apiKeyId(key.getId())
+                .endpoint(endpoint)
+                .method(method)
+                .ipAddress(ipAddress)
+                .status("SUCCESS")
+                .build();
+        usageLogRepository.save(log);
+        logService.log(tenantContextService.getCurrentTenantId(), null, "API_KEY", "api_key_validation", "validate", "{success}", null, "SUCCESS", 200, null, 0);
+        return key;
     }
 }

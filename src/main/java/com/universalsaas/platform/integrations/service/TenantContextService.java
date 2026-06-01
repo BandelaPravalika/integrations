@@ -11,12 +11,11 @@ import org.springframework.stereotype.Service;
 public class TenantContextService {
 
     public Long getCurrentTenantId() {
-        // TODO: Read tenantId from JWT claims or SecurityContext when login is enabled
-        return 1L;
+        Long tenantId = TenantContextHolder.getTenantId();
+        return tenantId != null ? tenantId : 1L;
     }
 
     public Long getCurrentUserId() {
-        // TODO: Read userId from JWT when login is enabled
-        return null;
+        return TenantContextHolder.getUserId();
     }
 }
