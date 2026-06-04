@@ -5,7 +5,7 @@ import com.universalsaas.platform.integrations.entity.IntegrationDefinition;
 import com.universalsaas.platform.integrations.entity.TenantIntegration;
 import com.universalsaas.platform.integrations.enums.IntegrationHealth;
 import com.universalsaas.platform.integrations.enums.IntegrationStatus;
-import com.universalsaas.platform.integrations.exception.IntegrationNotFoundException;
+import com.universalsaas.platform.integrations.exception.IntegrationConfigurationException;
 import com.universalsaas.platform.integrations.repository.IntegrationDefinitionRepository;
 import com.universalsaas.platform.integrations.repository.TenantIntegrationRepository;
 import com.universalsaas.platform.integrations.service.*;
@@ -93,13 +93,13 @@ public class IntegrationServiceImpl implements IntegrationService {
 
         if ("GOOGLE".equalsIgnoreCase(code)) {
             if (request.getClientId() == null || request.getClientId().isBlank()) {
-                throw new IntegrationNotFoundException("Google clientId is required");
+                throw new IntegrationConfigurationException("Google clientId is required");
             }
             if (request.getClientSecret() == null || request.getClientSecret().isBlank()) {
-                throw new IntegrationNotFoundException("Google clientSecret is required");
+                throw new IntegrationConfigurationException("Google clientSecret is required");
             }
             if (request.getRedirectUri() == null || request.getRedirectUri().isBlank()) {
-                throw new IntegrationNotFoundException("Google redirectUri is required");
+                throw new IntegrationConfigurationException("Google redirectUri is required");
             }
 
             String scopesJoined = (request.getScopes() != null && !request.getScopes().isEmpty())
@@ -120,13 +120,13 @@ public class IntegrationServiceImpl implements IntegrationService {
             ti.setConnectedAt(null);
         } else if ("ZOOM".equalsIgnoreCase(code)) {
             if (request.getClientId() == null || request.getClientId().isBlank()) {
-                throw new IntegrationNotFoundException("Zoom clientId is required");
+                throw new IntegrationConfigurationException("Zoom clientId is required");
             }
             if (request.getClientSecret() == null || request.getClientSecret().isBlank()) {
-                throw new IntegrationNotFoundException("Zoom clientSecret is required");
+                throw new IntegrationConfigurationException("Zoom clientSecret is required");
             }
             if (request.getRedirectUri() == null || request.getRedirectUri().isBlank()) {
-                throw new IntegrationNotFoundException("Zoom redirectUri is required");
+                throw new IntegrationConfigurationException("Zoom redirectUri is required");
             }
 
             String scopesJoined = (request.getScopes() != null && !request.getScopes().isEmpty())
@@ -167,10 +167,14 @@ public class IntegrationServiceImpl implements IntegrationService {
             settingService.saveSetting(ti.getId(), "webhook_url", request.getWebhookUrl(), false);
         }
 
-        if (request.getEnvironment() != null) {
-            ti.setEnvironment(request.getEnvironment().toLowerCase());
-            settingService.saveSetting(ti.getId(), "environment", request.getEnvironment().toLowerCase(), false);
+        String environment = request.getEnvironment();
+
+        if (environment == null || environment.isBlank()) {
+            environment = "development";
         }
+
+        ti.setEnvironment(environment.toLowerCase());
+        settingService.saveSetting(ti.getId(), "environment", environment.toLowerCase(), false);
 
         if (request.getSettings() != null) {
             settingService.saveSettings(ti.getId(), request.getSettings());
@@ -179,8 +183,22 @@ public class IntegrationServiceImpl implements IntegrationService {
         tenantIntegrationRepository.save(ti);
 
         Long tenantId = tenantContextService.getCurrentTenantId();
-        logService.log(tenantId, ti.getId(), code.toUpperCase(), "configure", "configure",
-                JsonUtil.toJson(Map.of("environment", request.getEnvironment())), null, "SUCCESS", 200, null, 0);
+        Map<String, Object> logPayload = new java.util.HashMap<>();
+        logPayload.put("environment", request.getEnvironment());
+        logPayload.put("code", code.toUpperCase());
+        logService.log(
+                tenantId,
+                ti.getId(),
+                code.toUpperCase(),
+                "configure",
+                "configure",
+                JsonUtil.toJson(logPayload),
+                null,
+                "SUCCESS",
+                200,
+                null,
+                0
+        );
 
         return toDetails(ctx);
     }

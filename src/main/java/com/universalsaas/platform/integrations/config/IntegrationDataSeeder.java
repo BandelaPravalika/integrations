@@ -1,50 +1,70 @@
 package com.universalsaas.platform.integrations.config;
 
 import com.universalsaas.platform.integrations.entity.IntegrationDefinition;
+import com.universalsaas.platform.integrations.entity.TenantIntegration;
+import com.universalsaas.platform.integrations.enums.IntegrationHealth;
+import com.universalsaas.platform.integrations.enums.IntegrationStatus;
 import com.universalsaas.platform.integrations.repository.IntegrationDefinitionRepository;
-import lombok.RequiredArgsConstructor;
+import com.universalsaas.platform.integrations.repository.TenantIntegrationRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
+import java.time.LocalDateTime;
+import java.util.Optional;
 
-import java.util.List;
-
+/**
+ * Ensures that the {@code API_KEY} integration definition and a default tenant integration
+ * (tenantId = 1) exist when the application starts.
+ *
+ * The seeder is idempotent – it will not create duplicate rows if they are already present.
+ */
 @Component
-@RequiredArgsConstructor
 public class IntegrationDataSeeder implements CommandLineRunner {
 
     private final IntegrationDefinitionRepository definitionRepository;
+    private final TenantIntegrationRepository tenantRepository;
+
+    public IntegrationDataSeeder(IntegrationDefinitionRepository definitionRepository,
+                                TenantIntegrationRepository tenantRepository) {
+        this.definitionRepository = definitionRepository;
+        this.tenantRepository = tenantRepository;
+    }
 
     @Override
     public void run(String... args) {
-        seedIfMissing("GOOGLE", "Google", "GOOGLE",
-                "Connect Google services like Gmail, Calendar, Drive, Meet and Sheets", "#4285F4", "PRODUCTIVITY");
-        seedIfMissing("META", "Meta", "META",
-                "Capture Facebook and Instagram leads", "#1877F2", "MARKETING");
-        seedIfMissing("WHATSAPP", "WhatsApp", "WHATSAPP",
-                "Send WhatsApp alerts and messages", "#25D366", "MESSAGING");
-        seedIfMissing("ZAPIER", "Zapier", "ZAPIER",
-                "Connect with external apps using Zapier", "#FF4A00", "AUTOMATION");
-        seedIfMissing("WEBHOOK", "Webhook", "WEBHOOK",
-                "Send real-time event data to external systems", "#6B7280", "AUTOMATION");
-        seedIfMissing("ZOOM", "Zoom", "ZOOM",
-                "Create and manage online meetings", "#2D8CFF", "MEETINGS");
-        seedIfMissing("CASHFREE", "Cashfree", "CASHFREE",
-                "Accept and verify online payments", "#6933D3", "PAYMENT");
-        seedIfMissing("API_KEY", "API Keys", "API_KEY",
-                "Allow external systems to access APIs securely", "#111827", "SECURITY");
-    }
-
-    private void seedIfMissing(String code, String name, String provider, String description, String color, String category) {
-        if (definitionRepository.findByCode(code).isEmpty()) {
-            definitionRepository.save(IntegrationDefinition.builder()
-                    .code(code)
-                    .name(name)
-                    .provider(provider)
-                    .description(description)
-                    .color(color)
-                    .category(category)
+        // 1. Ensure IntegrationDefinition for API_KEY exists
+        Optional<IntegrationDefinition> optDef = definitionRepository.findByCode("API_KEY");
+        IntegrationDefinition definition = optDef.orElseGet(() -> {
+            IntegrationDefinition def = IntegrationDefinition.builder()
+                    .code("API_KEY")
+                    .name("API Key")
+                    .category("AUTHENTICATION")
+                    .provider("INTERNAL")
+                    .description("Generate API keys for external systems to access selected public APIs securely.")
+                    .icon("key")
+                    .color("#6366F1")
                     .active(true)
-                    .build());
+                    .build();
+            return definitionRepository.save(def);
+        });
+
+        // 2. Ensure TenantIntegration for tenantId = 1 and code = API_KEY exists
+        Long tenantId = 1L;
+        boolean exists = tenantRepository.existsByTenantIdAndCode(tenantId, "API_KEY");
+        if (!exists) {
+            TenantIntegration ti = TenantIntegration.builder()
+                    .tenantId(tenantId)
+                    .integrationDefinitionId(definition.getId())
+                    .code("API_KEY")
+                    .enabled(true)
+                    .connected(true)
+                    .status(IntegrationStatus.CONNECTED)
+                    .health(IntegrationHealth.HEALTHY)
+                    .environment("development")
+                    .connectedAt(LocalDateTime.now())
+                    .createdAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+            tenantRepository.save(ti);
         }
     }
 }

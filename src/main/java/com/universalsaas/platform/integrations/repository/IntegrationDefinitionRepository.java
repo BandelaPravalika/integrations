@@ -10,6 +10,8 @@ import java.util.Optional;
 @Repository
 public interface IntegrationDefinitionRepository extends JpaRepository<IntegrationDefinition, Long> {
 
+    Optional<IntegrationDefinition> findByCodeIgnoreCase(String code);
+    boolean existsByCodeIgnoreCase(String code);
     Optional<IntegrationDefinition> findByCode(String code);
 
     List<IntegrationDefinition> findByActiveTrue();

@@ -23,6 +23,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import com.universalsaas.platform.integrations.util.OAuthUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -91,7 +92,8 @@ public class GoogleOAuthServiceImpl implements GoogleOAuthService {
     @Transactional
     public String handleCallback(String authCode, String state) {
         // Use DB-stored credentials for token exchange
-        TenantIntegrationContext ctx = tenantIntegrationResolver.resolveContext(GOOGLE_CODE);
+        Long tenantIdFromState = OAuthUtils.extractTenantId(state);
+        TenantIntegrationContext ctx = tenantIntegrationResolver.resolveContext(tenantIdFromState, GOOGLE_CODE);
         TenantIntegration ti = ctx.getTenantIntegration();
         String clientId = credentialService.getDecryptedClientId(ti.getId());
         String clientSecret = credentialService.getDecryptedClientSecret(ti.getId());
@@ -135,8 +137,7 @@ public class GoogleOAuthServiceImpl implements GoogleOAuthService {
         ti.setConnectedAt(LocalDateTime.now());
         tenantIntegrationRepository.save(ti);
 
-        Long tenantId = tenantContextService.getCurrentTenantId();
-        logService.log(tenantId, ti.getId(), GOOGLE_CODE, "oauth_callback", "connect",
+        logService.log(tenantIdFromState, ti.getId(), GOOGLE_CODE, "oauth_callback", "connect",
                 null, JsonUtil.toJson(Map.of("status", "connected")), "SUCCESS", 200, null, 0);
         return frontendUrl + "/integrations?connected=google";
     }

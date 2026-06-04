@@ -7,6 +7,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.universalsaas.platform.integrations.exception.IntegrationConfigurationException;
 
 import java.util.stream.Collectors;
 
@@ -16,6 +17,12 @@ public class GlobalIntegrationExceptionHandler {
     @ExceptionHandler(IntegrationException.class)
     public ResponseEntity<ApiResponseDto<Void>> handleIntegration(IntegrationException ex) {
         return ResponseEntity.status(ex.getStatus())
+                .body(ApiResponseDto.failure(ex.getMessage(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(IntegrationConfigurationException.class)
+    public ResponseEntity<ApiResponseDto<Void>> handleConfigurationException(IntegrationConfigurationException ex) {
+        return ResponseEntity.badRequest()
                 .body(ApiResponseDto.failure(ex.getMessage(), ex.getMessage()));
     }
 

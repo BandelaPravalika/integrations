@@ -44,10 +44,19 @@ public class TenantIntegrationResolver {
     @Transactional
     public TenantIntegrationContext resolveContext(String code) {
         Long tenantId = tenantContextService.getCurrentTenantId();
+        return resolveContext(tenantId, code);
+    }
+
+    @Transactional
+    public TenantIntegrationContext resolveContext(Long tenantId, String code) {
         String upper = code.toUpperCase();
-        IntegrationDefinition def = definitionRepository.findByCode(upper)
-                .orElseThrow(() -> new IntegrationNotFoundException("Integration definition not found: " + code));
+
+        IntegrationDefinition def = definitionRepository.findByCodeIgnoreCase(upper)
+                .orElseThrow(() -> new IntegrationNotFoundException(
+                        "Integration definition not found: " + code));
+
         TenantIntegration ti = getOrCreateTenantIntegration(tenantId, def);
+
         return TenantIntegrationContext.builder()
                 .tenantId(tenantId)
                 .definition(def)

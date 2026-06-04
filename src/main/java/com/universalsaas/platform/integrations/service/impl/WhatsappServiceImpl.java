@@ -67,7 +67,7 @@ public class WhatsappServiceImpl implements WhatsappService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+@Transactional
     public Map<String, Object> getStatus() {
         var ctx = tenantIntegrationResolver.resolveContext(WHATSAPP_CODE);
         TenantIntegration ti = ctx.getTenantIntegration();

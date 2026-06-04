@@ -26,6 +26,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import com.universalsaas.platform.integrations.util.OAuthUtils;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Map;
@@ -74,7 +75,8 @@ public class ZoomServiceImpl implements ZoomService {
     @Override
     @Transactional
     public String handleCallback(String authCode, String state) {
-        var ctx = tenantIntegrationResolver.resolveContext(ZOOM_CODE);
+        Long tenantIdFromState = OAuthUtils.extractTenantId(state);
+        var ctx = tenantIntegrationResolver.resolveContext(tenantIdFromState, ZOOM_CODE);
         Long tiId = ctx.getTenantIntegration().getId();
         String clientId = credentialService.getDecryptedClientId(tiId);
         String clientSecret = credentialService.getDecryptedClientSecret(tiId);
@@ -118,8 +120,7 @@ public class ZoomServiceImpl implements ZoomService {
             ti.setConnectedAt(LocalDateTime.now());
             tenantIntegrationRepository.save(ti);
 
-            Long tenantId = tenantContextService.getCurrentTenantId();
-            logService.log(tenantId, ti.getId(), ZOOM_CODE, "oauth_callback", "connect",
+            logService.log(tenantIdFromState, ti.getId(), ZOOM_CODE, "oauth_callback", "connect",
                     null, null, "SUCCESS", 200, null, 0);
             return frontendUrl + "/integrations?connected=zoom";
         } catch (Exception e) {
